@@ -24,8 +24,8 @@ from YJQTrack.q_noise_enhanced.full_q_for_ral_r1.q_noise_with_trajectory import 
 
 class EnhancedProcessNoiseManager:
     """
-    增强版过程噪声管理器
-    集成多种Q矩阵学习方法
+    Enhanced process noise manager
+    Integrates multiple Q matrix learning methods
     """
 
     def __init__(self, config, device, dtype):
@@ -34,27 +34,26 @@ class EnhancedProcessNoiseManager:
         self.dim_x = config['dim_x']
         self.config = config
 
-        # 获取默认Q矩阵
+        # Get default Q matrix
 
-        # 创新序列历史缓存
+        # Innovation sequence history cache
         self.innovation_histories = {}  # track_id -> innovation_history
         self.max_history_length = 20
 
     def update_innovation_history(self, track_id: int, innovation: torch.Tensor):
-        """更新创新序列历史"""
+        """Update innovation sequence history"""
         if track_id not in self.innovation_histories:
             self.innovation_histories[track_id] = []
 
         self.innovation_histories[track_id].append(innovation.detach().clone())
 
-        # 保持固定长度
+        # Maintain fixed length
         if len(self.innovation_histories[track_id]) > self.max_history_length:
             self.innovation_histories[track_id].pop(0)
         return self.innovation_histories
 
-    def \
-            get_innovation_sequence(self, track_id: int, seq_len: int = 10) -> Optional[torch.Tensor]:
-        """获取创新序列"""
+    def get_innovation_sequence(self, track_id: int, seq_len: int = 10) -> Optional[torch.Tensor]:
+        """Get innovation sequence"""
         if track_id not in self.innovation_histories:
             return None
 
@@ -62,7 +61,7 @@ class EnhancedProcessNoiseManager:
         if len(history) < seq_len:
             return None
 
-        # 取最近的seq_len个创新向量
+        # Get the most recent seq_len innovation vectors
         recent_innovations = history[-seq_len:]
         return torch.stack(recent_innovations, dim=0)  # [seq_len, dim_z]
 
@@ -70,19 +69,19 @@ class EnhancedProcessNoiseManager:
                            current_innovation: Optional[torch.Tensor] = None,
                            positional_features: Optional[torch.Tensor] = None) -> torch.Tensor:
         """
-        计算自适应Q矩阵
+        Compute adaptive Q matrix
 
         Args:
-            track_id: 轨迹ID
-            state_history: [seq_len, dim_x] 状态历史
-            current_innovation: [dim_z] 当前创新向量
-            positional_features: [18] 位置特征
+            track_id: Track ID
+            state_history: [seq_len, dim_x] State history
+            current_innovation: [dim_z] Current innovation vector
+            positional_features: [18] Positional features
 
         Returns:
-            adaptive_Q: [dim_x, dim_x] 自适应Q矩阵
+            adaptive_Q: [dim_x, dim_x] Adaptive Q matrix
         """
-        # if state_history.shape[0] < 5:  # 历史不够长
-        if len(state_history) < 5:  # 历史不够长
+        # if state_history.shape[0] < 5:  # History not long enough
+        if len(state_history) < 5:  # History not long enough
             return self.default_Q
 
         try:
@@ -90,7 +89,7 @@ class EnhancedProcessNoiseManager:
             if not isinstance(state_history, torch.Tensor):
                 state_history = torch.stack([torch.tensor(s, dtype=self.dtype, device=self.device)
                                              for s in state_history])
-            # 准备输入数据
+            # Prepare input data
             state_batch = state_history.unsqueeze(0)  # [1, seq_len, dim_x]
 
             if self.method_type == 'innovation_based':
@@ -111,12 +110,12 @@ class EnhancedProcessNoiseManager:
                 else:
                     current_innovation_batch = torch.zeros(1, 7, dtype=self.dtype, device=self.device)
 
-                # 网络前向传播
+                # Network forward propagation
                 adaptive_Q_batch, adaptive_weight = self.q_net(
                     innovation_batch, state_batch, current_state_batch, current_innovation_batch
                 )
                 adaptive_Q = adaptive_Q_batch[0]
-                # 混合默认Q和自适应Q
+                # Blend default Q and adaptive Q
                 # adaptive_Q = self.q_net.get_blended_Q(
                 #     self.default_Q, adaptive_Q_batch, adaptive_weight
                 # )[0]
@@ -137,7 +136,7 @@ class EnhancedProcessNoiseManager:
                     state_batch
                 )
 
-                # 使用时变权重混合
+                # Blend using time-varying weights
                 weight = temporal_weights[0, 0].item()
                 adaptive_Q = (1 - weight) * self.default_Q + weight * adaptive_Q_batch[0]
 
@@ -168,7 +167,7 @@ class BestForNowTrack(DMSTrack):
         self.covariance_intersection = FastCovarianceIntersection(
             dtype=dtype,
             device=device,
-            method='improved_trace'  # 推荐使用改进的行列式方法
+            method='improved_trace'  # Recommended to use improved trace method
         )
 
         # self.q_net_dict = q_net_dict
@@ -190,11 +189,11 @@ class BestForNowTrack(DMSTrack):
         }
         self.delay_config = delay_config if delay_config else {}
         self.detection_buffer = {}
-        # 缓冲区最大长度（保留最近N帧）
+        # Maximum buffer length (keep recent N frames)
         self.max_buffer_size = 10
 
     def add_detection_to_buffer(self, cav_id, frame, dets, info, feature, transformation_matrix):
-        """将检测数据添加到缓冲区"""
+        """Add detection data to buffer"""
         if cav_id not in self.detection_buffer:
             self.detection_buffer[cav_id] = {}
 
@@ -205,11 +204,11 @@ class BestForNowTrack(DMSTrack):
             'transformation_matrix': transformation_matrix
         }
 
-        # 清理过旧的缓冲数据
+        # Clean old buffer data
         self._clean_old_buffer(cav_id, frame)
 
     def _clean_old_buffer(self, cav_id, current_frame):
-        """清理超过缓冲区大小的旧数据"""
+        """Clean data older than buffer size"""
         frames_to_keep = list(range(
             max(0, current_frame - self.max_buffer_size + 1),
             current_frame + 1
@@ -222,14 +221,14 @@ class BestForNowTrack(DMSTrack):
 
     def get_delayed_detection(self, cav_id, current_frame):
         """
-        根据延迟配置获取相应时间的检测数据
+        Get detection data from corresponding time based on delay configuration
 
         Args:
-            cav_id: 车辆ID
-            current_frame: 当前帧号
+            cav_id: Vehicle ID
+            current_frame: Current frame number
 
         Returns:
-            延迟后的检测数据，如果不存在则返回None
+            Delayed detection data, or None if not available
         """
         delay = self.delay_config.get(cav_id, 0)
         target_frame = current_frame - delay
@@ -238,12 +237,12 @@ class BestForNowTrack(DMSTrack):
             return None
 
         if target_frame not in self.detection_buffer[cav_id]:
-            # 如果目标帧不在缓冲区，尝试返回最近的可用帧
+            # If target frame not in buffer, try to return most recent available frame
             available_frames = sorted(self.detection_buffer[cav_id].keys())
             if not available_frames:
                 return None
 
-            # 找到最接近但不超过target_frame的帧
+            # Find closest frame not exceeding target_frame
             valid_frames = [f for f in available_frames if f <= target_frame]
             if valid_frames:
                 target_frame = max(valid_frames)
@@ -256,7 +255,7 @@ class BestForNowTrack(DMSTrack):
         return self.detection_buffer[cav_id][target_frame]
 
     def get_effective_delay(self, cav_id, current_frame):
-        """获取实际延迟帧数（考虑缓冲区可用性）"""
+        """Get actual delay in frames (considering buffer availability)"""
         delay = self.delay_config.get(cav_id, 0)
         target_frame = current_frame - delay
 
@@ -278,71 +277,71 @@ class BestForNowTrack(DMSTrack):
         # q_ablation_mode = 'lstm_full'
         #
         # if q_ablation_mode == 'full':
-        #     # 完整模型
+        #     # Full model
         #     self.q_net_dict = q_net_dict
         #     self.q_loss_fn = TrajectoryBasedQLoss()
         #
         # elif q_ablation_mode == 'lstm_diag':
-        #     # 简化版1: LSTM + 对角Q
+        #     # Simplified version 1: LSTM + diagonal Q
         #     self.q_net_dict = {
         #         'ego': SimplifiedQNet_Diagonal(q_learning_config, device, dtype)
         #     }
         #     self.q_loss_fn = TrajectoryBasedQLoss()
         #
         # elif q_ablation_mode == 'lstm_full':
-        #     # 简化版2: LSTM + 完整协方差Q
+        #     # Simplified version 2: LSTM + full covariance Q
         #     self.q_net_dict = {
         #         'ego': SimplifiedQNet_FullCov(q_learning_config, device, dtype)
         #     }
         #     self.q_loss_fn = TrajectoryBasedQLoss()
     def update_with_hybrid_ci(self, matched_detections_dict, frame, intermediate_tracks, is_training=False):
         """
-        使用混合策略：先对每个CAV单独进行卡尔曼滤波更新，再使用CI算法融合
+        Use hybrid strategy: first perform Kalman filter update for each CAV separately, then fuse using CI algorithm
 
-        参数:
-            matched_detections_dict: 字典，键为cav_id，值为该CAV匹配的检测列表
-            frame: 当前帧号
-            intermediate_tracks: 字典，键为cav_id，值为该CAV的轨迹副本
-            is_training: 是否为训练模式
+        Args:
+            matched_detections_dict: Dictionary with cav_id as key and matched detection list as value
+            frame: Current frame number
+            intermediate_tracks: Dictionary with cav_id as key and track copy as value
+            is_training: Whether in training mode
         """
         ci = self.covariance_intersection
 
-        # 第一步：对每个CAV的轨迹副本进行独立卡尔曼滤波更新
+        # Step 1: Perform independent Kalman filter update for each CAV's track copy
         for cav_id, matched_data in matched_detections_dict.items():
             cav_tracks = intermediate_tracks[cav_id]
             # if cav_id == 'ego':
-            # 处理每个匹配对
+            # Process each matched pair
             for match in matched_data:
                 det_idx, trk_idx, bbox3d, R = match
 
-                # 获取对应的轨迹副本
+                # Get corresponding track copy
                 trk = cav_tracks[trk_idx]
 
-                # 进行方向校正
+                # Perform orientation correction
                 trk_bbox3d = torch.tensor(bbox3d, dtype=self.dtype, device=self.device)
                 trk.dkf.x[3], trk_bbox3d[3] = self.orientation_correction_torch(trk.dkf.x[3], trk_bbox3d[3])
 
-                # 标准卡尔曼滤波更新
+                # Standard Kalman filter update
                 trk.dkf.update(trk_bbox3d, R, None)
                 trk.time_since_update = 0
                 trk.hits += 1
                 trk.dkf.x[3] = self.within_range_torch(trk.dkf.x[3])
 
-        # 第二步：对每个轨迹，收集并融合来自不同CAV的更新结果
+        # Step 2: For each track, collect and fuse update results from different CAVs
         for trk_idx, trk in enumerate(self.trackers):
-            # 收集所有匹配到这个轨迹的CAV更新结果
+            # Collect update results from all CAVs that matched this track
             means = []
             covariances = []
 
-            # 首先添加原始预测状态
+            # First add original predicted state
             means.append(trk.dkf.x)
             covariances.append(trk.dkf.P)
 
-            # 从每个CAV的轨迹副本中收集更新后的状态
-            cav_detections = {}  # 用于记录匹配信息
+            # Collect updated states from each CAV's track copy
+            cav_detections = {}  # Record matching information
 
             for cav_id, cav_tracks in intermediate_tracks.items():
-                # 检查该CAV是否有匹配到这个轨迹的检测
+                # Check if this CAV has detections matching this track
                 matched = False
                 for match in matched_detections_dict.get(cav_id, []):
                     if match[1] == trk_idx:
@@ -351,32 +350,32 @@ class BestForNowTrack(DMSTrack):
                         cav_detections[cav_id] = det_idx
                         break
 
-                # 如果有匹配，收集该CAV更新后的轨迹状态
+                # If matched, collect updated track state from this CAV
                 if matched:
                     cav_trk = cav_tracks[trk_idx]
                     means.append(cav_trk.dkf.x)
                     covariances.append(cav_trk.dkf.P)
 
-            # 如果至少有一个CAV检测到这个轨迹，使用CI融合
+            # If at least one CAV detected this track, use CI fusion
             if len(means) > 1:
-                # 使用CI算法融合
+                # Use CI algorithm for fusion
                 fused_mean, fused_cov = ci.fuse(means, covariances)
 
-                # 更新主轨迹状态
+                # Update main track state
                 trk.dkf.x = fused_mean
                 trk.dkf.P = fused_cov
                 trk.dkf.x[3] = self.within_range_torch(trk.dkf.x[3])
 
-                # 更新轨迹统计信息
+                # Update track statistics
                 trk.time_since_update = 0
                 trk.hits += 1
                 trk.last_updated_frame = frame
 
-                # 更新匹配信息
+                # Update matching information
                 for cav_id, det_idx in cav_detections.items():
                     trk.matched_detection_id_dict[cav_id] = det_idx
 
-        # 训练模式下的额外处理
+        # Additional processing in training mode
         if is_training and hasattr(ci, 'get_average_loss'):
             self.ci_stats = {
                 'ci_fusion_loss': ci.get_average_loss(),
@@ -385,72 +384,72 @@ class BestForNowTrack(DMSTrack):
 
     def update_with_information_form(self, matched_detections_dict, frame):
         """
-        使用信息形式进行多传感器卡尔曼滤波更新
-        这种方法对独立测量在数学上是最优的
+        Use information form for multi-sensor Kalman filter update
+        This method is mathematically optimal for independent measurements
         """
         for trk_idx, trk in enumerate(self.trackers):
-            # 收集所有匹配到这个轨迹的检测
+            # Collect all detections matching this track
             matched_measurements = []
 
             for cav_id, matches in matched_detections_dict.items():
                 for match in matches:
-                    if match[1] == trk_idx:  # 匹配到当前轨迹
+                    if match[1] == trk_idx:  # Matched to current track
                         det_idx, _, bbox3d, R = match
 
-                        # 方向校正
+                        # Orientation correction
                         bbox3d_tensor = torch.tensor(bbox3d, dtype=self.dtype, device=self.device)
                         trk.dkf.x[3], bbox3d_tensor[3] = self.orientation_correction_torch(
                             trk.dkf.x[3], bbox3d_tensor[3])
 
                         matched_measurements.append({
-                            'z': bbox3d_tensor.reshape(-1, 1),  # 观测向量
-                            'R': R,  # 观测协方差
+                            'z': bbox3d_tensor.reshape(-1, 1),  # Observation vector
+                            'R': R,  # Observation covariance
                             'cav_id': cav_id,
                             'det_idx': det_idx
                         })
 
             if not matched_measurements:
-                continue  # 没有匹配的测量
+                continue  # No matched measurements
 
-            # 转换到信息形式
-            info_matrix = torch.inverse(trk.dkf.P)  # 信息矩阵
-            info_vector = torch.matmul(info_matrix, trk.dkf.x)  # 信息向量
+            # Convert to information form
+            info_matrix = torch.inverse(trk.dkf.P)  # Information matrix
+            info_vector = torch.matmul(info_matrix, trk.dkf.x)  # Information vector
 
-            # 观测矩阵 H (将状态空间映射到观测空间)
+            # Observation matrix H (maps state space to observation space)
             H = torch.zeros((7, 10), dtype=self.dtype, device=self.device)
             H[:7, :7] = torch.eye(7, dtype=self.dtype, device=self.device)
 
-            # 累加每个独立测量的信息
+            # Accumulate information contribution from each independent measurement
             for measurement in matched_measurements:
                 z = measurement['z']
                 R = measurement['R']
 
-                # 计算观测的信息贡献
+                # Calculate observation information contribution
                 R_inv = torch.inverse(R)
                 H_T_R_inv = torch.matmul(H.t(), R_inv)
 
-                # 更新信息矩阵和信息向量
+                # Update information matrix and information vector
                 info_matrix += torch.matmul(H_T_R_inv, H)
                 info_vector += torch.matmul(H_T_R_inv, z)
 
-                # 记录匹配信息
+                # Record matching information
                 trk.matched_detection_id_dict[measurement['cav_id']] = measurement['det_idx']
 
-            # 转换回协方差形式
+            # Convert back to covariance form
             trk.dkf.P = torch.inverse(info_matrix)
             trk.dkf.x = torch.matmul(trk.dkf.P, info_vector)
 
-            # 角度归一化
+            # Angle normalization
             trk.dkf.x[3] = self.within_range_torch(trk.dkf.x[3])
 
-            # 更新轨迹统计信息
+            # Update track statistics
             trk.time_since_update = 0
             trk.hits += 1
             trk.last_updated_frame = frame
 
     def compute_trajectory_q_loss_statistics(self):
         """
-        计算轨迹Q损失的统计信息，格式与其他损失一致
+        Compute trajectory Q loss statistics, format consistent with other losses
         """
         if not hasattr(self, 'current_q_loss_components'):
             return {
@@ -464,7 +463,7 @@ class BestForNowTrack(DMSTrack):
                 'count': 0
             }
 
-        # 收集所有轨迹的Q损失
+        # Collect Q loss from all tracks
         total_q_loss = torch.tensor(0.0, dtype=self.dtype, device=self.device)
         valid_count = 0
 
@@ -480,32 +479,32 @@ class BestForNowTrack(DMSTrack):
 
     def update_with_hybrid_ci_update_mix_r_q(self, matched_detections_dict, frame, intermediate_tracks):
         """
-        使用混合策略：先对每个CAV单独进行卡尔曼滤波更新，再使用CI算法融合
+        Use hybrid strategy: first perform Kalman filter update for each CAV separately, then fuse using CI algorithm
 
-        参数:
-            matched_detections_dict: 字典，键为cav_id，值为该CAV匹配的检测列表
-            frame: 当前帧号
-            intermediate_tracks: 字典，键为cav_id，值为该CAV的轨迹副本
-            is_training: 是否为训练模式
+        Args:
+            matched_detections_dict: Dictionary with cav_id as key and matched detection list as value
+            frame: Current frame number
+            intermediate_tracks: Dictionary with cav_id as key and track copy as value
+            is_training: Whether in training mode
         """
         ci = self.covariance_intersection
 
-        # 第一步：对每个CAV的轨迹副本进行独立卡尔曼滤波更新
+        # Step 1: Perform independent Kalman filter update for each CAV's track copy
         for cav_id, matched_data in matched_detections_dict.items():
             cav_tracks = intermediate_tracks[cav_id]
             if cav_id == 'ego':
-                # 处理每个匹配对
+                # Process each matched pair
                 for match in matched_data:
                     det_idx, trk_idx, bbox3d, R = match
 
-                    # 获取对应的轨迹副本
+                    # Get corresponding track copy
                     trk = cav_tracks[trk_idx]
 
-                    # 进行方向校正
+                    # Perform orientation correction
                     trk_bbox3d = torch.tensor(bbox3d, dtype=self.dtype, device=self.device)
                     trk.dkf.x[3], trk_bbox3d[3] = self.orientation_correction_torch(trk.dkf.x[3], trk_bbox3d[3])
 
-                    # 标准卡尔曼滤波更新
+                    # Standard Kalman filter update
                     trk.dkf.update(trk_bbox3d, R, None)
                     trk.time_since_update = 0
                     trk.hits += 1
@@ -514,28 +513,28 @@ class BestForNowTrack(DMSTrack):
             #     for match in matched_data:
             #         det_idx, trk_idx, bbox3d, R = match
             #         trk = cav_tracks[trk_idx]
-            #         # 进行方向校正
+            #         # Perform orientation correction
             #         trk_bbox3d = torch.tensor(bbox3d, dtype=self.dtype, device=self.device)
             #         trk.dkf.x[3], trk_bbox3d[3] = self.orientation_correction_torch(trk.dkf.x[3], trk_bbox3d[3])
             #         # trk.dkf.x[3] = self.within_range_torch(trk.dkf.x[3])
 
-        # 第二步：对每个轨迹，收集并融合来自不同CAV的更新结果
+        # Step 2: For each track, collect and fuse update results from different CAVs
         for trk_idx, trk in enumerate(self.trackers):
-            # 收集所有匹配到这个轨迹的CAV更新结果
+            # Collect update results from all CAVs that matched this track
             means = []
             covariances = []
 
-            # 首先添加原始预测状态
+            # First add original predicted state
             means.append(trk.dkf.x)
             covariances.append(trk.dkf.P)
 
-            # 从每个CAV的轨迹副本中收集更新后的状态
-            cav_detections = {}  # 用于记录匹配信息
+            # Collect updated states from each CAV's track copy
+            cav_detections = {}  # Record matching information
 
             for cav_id, cav_tracks in intermediate_tracks.items():
 
                 # if cav_id == 'ego':
-                # 检查该CAV是否有匹配到这个轨迹的检测
+                # Check if this CAV has detections matching this track
                 matched = False
 
                 for match in matched_detections_dict.get(cav_id, []):
@@ -547,44 +546,44 @@ class BestForNowTrack(DMSTrack):
                         cav_detections[cav_id] = det_idx
                         break
 
-                # 如果有匹配，收集该CAV更新后的轨迹状态
+                # If matched, collect updated track state from this CAV
                 if matched:
                     cav_trk = cav_tracks[trk_idx]
                     means.append(cav_trk.dkf.x)
                     covariances.append(cav_trk.dkf.P)
 
-            # 如果至少有一个CAV检测到这个轨迹，使用CI融合
+            # If at least one CAV detected this track, use CI fusion
             if len(means) > 1:
                 # if len(means) >2:
                 #     means = means[1:]
                 #     covariances = covariances[1:]
-                # 使用CI算法融合
+                # Use CI algorithm for fusion
                 fused_mean, fused_cov = ci.fuse(means, covariances)
 
-                # 更新主轨迹状态
+                # Update main track state
                 trk.dkf.x = fused_mean
                 trk.dkf.P = fused_cov
                 trk.dkf.x[3] = self.within_range_torch(trk.dkf.x[3])
 
-                # 更新轨迹统计信息
+                # Update track statistics
                 trk.time_since_update = 0
                 trk.hits += 1
                 trk.last_updated_frame = frame
 
-                # 更新匹配信息
+                # Update matching information
                 for cav_id, det_idx in cav_detections.items():
                     trk.matched_detection_id_dict[cav_id] = det_idx
 
     def prediction(self, default_init_Q):
         """
-        重写预测步骤，使用自适应Q矩阵
+        Override prediction step to use adaptive Q matrix
         """
         self.history_manager.update_histories(self.trackers, self.frame_count)
 
         trks = []
         q_loss_components = []
 
-        # ✅ 当前帧统计
+        # Current frame statistics
         frame_stats = {
             'frame': self.frame_count,
             'total_tracks': len(self.trackers),
@@ -602,32 +601,32 @@ class BestForNowTrack(DMSTrack):
                 print('\n current velocity')
                 print(kf_tmp.get_velocity())
 
-            # 获取状态历史
+            # Get state history
             history_data, valid_length = self.history_manager.get_track_history(
                 kf_tmp.id, history_length=20
             )
 
-            # ✅ 初始化轨迹详情（必须在使用前定义！）
+            # Initialize track details (must be defined before use!)
             track_detail = {
                 'track_id': kf_tmp.id,
                 'valid_length': valid_length,
                 'used_adaptive': False
             }
 
-            # 计算自适应Q矩阵
+            # Compute adaptive Q matrix
             if valid_length >= 3 and self.enable_learnable_Q:
                 try:
                     adaptive_Q, motion_probs, complexity_score = self.q_net_dict['ego'](
                         history_data, default_init_Q
                     )
 
-                    # ✅ 统计
+                    # Statistics
                     self.q_usage_stats['adaptive_q_used'] += 1
                     frame_stats['adaptive_q_count'] += 1
                     track_detail['used_adaptive'] = True
                     track_detail['Q_trace'] = torch.trace(adaptive_Q).item()
 
-                    # ✅ 只在训练时计算损失
+                    # Only compute loss during training
                     if self.is_training:
                         q_loss, q_loss_dict = self.q_loss_fn(
                             adaptive_Q, motion_probs, complexity_score, default_init_Q
@@ -642,7 +641,7 @@ class BestForNowTrack(DMSTrack):
                     track_specific_Q = adaptive_Q
 
                 except Exception as e:
-                    print(f"❌ Error computing Q for track {kf_tmp.id}: {e}")
+                    print(f"Error computing Q for track {kf_tmp.id}: {e}")
                     import traceback
                     traceback.print_exc()
 
@@ -657,11 +656,11 @@ class BestForNowTrack(DMSTrack):
                 frame_stats['default_q_count'] += 1
                 track_detail['Q_trace'] = torch.trace(default_init_Q).item()
 
-            # ✅ 记录统计
+            # Record statistics
             self.q_usage_stats['total_predictions'] += 1
             frame_stats['track_details'].append(track_detail)
 
-            # 卡尔曼滤波预测
+            # Kalman filter prediction
             kf_tmp.dkf.predict(track_specific_Q)
 
             if kf_tmp.id == self.debug_id:
@@ -682,7 +681,7 @@ class BestForNowTrack(DMSTrack):
         self.q_usage_stats['frames_processed'] += 1
         self.q_usage_stats['per_frame_stats'].append(frame_stats)
 
-        # ✅ 每50帧打印一次汇总
+        # Print summary every 50 frames
         if self.frame_count > 0 and self.frame_count % 50 == 0:
             total = self.q_usage_stats['total_predictions']
             adaptive = self.q_usage_stats['adaptive_q_used']
@@ -703,7 +702,7 @@ class BestForNowTrack(DMSTrack):
         return trks
 
     def get_final_q_statistics(self):
-        """在序列结束时调用，获取最终统计"""
+        """Called at end of sequence to get final statistics"""
         total = self.q_usage_stats['total_predictions']
         if total == 0:
             return None
@@ -718,21 +717,21 @@ class BestForNowTrack(DMSTrack):
         return stats
 
     def get_empirical_covariance(self, track_id, innovation_histories):
-        """渐进计算：有足够样本就开始，质量随样本增加而提高"""
+        """Progressive computation: start when enough samples available, quality improves with more samples"""
         if track_id not in innovation_histories:
             return None, None
 
         innovations = list(innovation_histories[track_id])
 
-        # 最少需要5个样本，但不需要等到20个
+        # Minimum 5 samples needed, but no need to wait for 20
         if len(innovations) < self.min_samples:
             return None, None
 
-        # 使用当前所有可用的样本（5到20个之间）
+        # Use all currently available samples (between 5 and 20)
         innovation_matrix = torch.stack(innovations)
         S_empirical = torch.cov(innovation_matrix.T)
 
-        # 返回协方差矩阵和置信度权重
+        # Return covariance matrix and confidence weight
         confidence = min(len(innovations) / self.window_size, 1.0)
         return S_empirical, confidence
 
@@ -743,34 +742,34 @@ class BestForNowTrack(DMSTrack):
             if t not in unmatched_trks:
                 d = matched[np.where(matched[:, 1] == t)[0], 0]
                 if len(d) == 1:
-                    # 计算创新向量
+                    # Compute innovation vector
                     bbox3d = Box3D.bbox2array(dets[d[0]])
                     predicted_bbox = trk.dkf.x[:7, 0].detach().clone()
                     innovation = torch.tensor(bbox3d, dtype=self.dtype, device=self.device) - predicted_bbox
 
-                    # 更新创新序列历史
+                    # Update innovation sequence history
                     innovation_histories = self.q_manager.update_innovation_history(trk.id, innovation)
                     s_empirical, confidence = self.get_empirical_covariance(trk.id, innovation_histories)
                     s_empirical_list.append(s_empirical)
                     confidence_list.append(confidence)
-                    # 经验协方差计算
+                    # Empirical covariance calculation
                     if trk.id not in self.s_empirical:
                         if s_empirical is not None:
                             self.s_empirical[trk.id] = {
-                                's_empirical': s_empirical_list,  # 状态向量历史
-                                'covariances': confidence_list}  # 协方差矩阵历史
+                                's_empirical': s_empirical_list,  # State vector history
+                                'covariances': confidence_list}  # Covariance matrix history
 
         return self.s_theoretical, self.s_empirical
 
     def compute_joint_rq_loss_unified(self, matched, unmatched_trks, dets, learnable_R_dict):
         """
-        统一的RQ损失计算，确保s_theoretical和s_empirical同步
+        Unified RQ loss computation, ensuring s_theoretical and s_empirical are synchronized
         """
         total_loss = torch.tensor(0.0, dtype=self.dtype, device=self.device)
         valid_pairs = 0
 
         for t, trk in enumerate(self.trackers):
-            if t in unmatched_trks:  # 跳过未匹配的轨迹
+            if t in unmatched_trks:  # Skip unmatched tracks
                 continue
             kf_tmp = self.trackers[t]
             track_id = trk.id
@@ -780,30 +779,30 @@ class BestForNowTrack(DMSTrack):
             d = matched[np.where(matched[:, 1] == t)[0], 0]
             # if len(d) == 1 and state_valid_length >= 5:
             if len(d) == 1:
-                # 计算创新向量
+                # Compute innovation vector
                 bbox3d = Box3D.bbox2array(dets[d[0]])
                 predicted_bbox = trk.dkf.x[:7, 0].detach().clone()
                 innovation = torch.tensor(bbox3d, dtype=self.dtype, device=self.device) - predicted_bbox
                 # innovation_history = self.q_manager.innovation_histories.get(track_id, [])
                 innovation_histories = self.q_manager.update_innovation_history(trk.id, innovation)
                 self.innovations_id_list = list(innovation_histories[track_id])
-            # 1. 统一检查条件：同时需要足够的状态历史和innovation历史
+            # 1. Unified condition check: need both sufficient state history and innovation history
 
             # innovation_history = self.q_manager.innovation_histories.get(track_id, [])
 
-            # 关键：同时满足两个条件才进行计算
+            # Key: only proceed with computation when both conditions are met
             if len(self.innovations_id_list) >= self.min_samples:
 
-                # 2. 计算s_theoretical（基于当前状态）
+                # 2. Compute s_theoretical (based on current state)
                 try:
-                    # 计算理论S
+                    # Compute theoretical S
                     s_theoretical = kf_tmp.dkf.compute_S_theoretical_with_predicted_P(learnable_R_dict[d[0]])
 
                 except Exception as e:
                     print(f"Error computing s_theoretical for track {track_id}: {e}")
                     continue
 
-                # 3. 计算s_empirical（基于innovation历史）
+                # 3. Compute s_empirical (based on innovation history)
                 try:
                     innovation_matrix = torch.stack(self.innovations_id_list)
                     s_empirical = torch.cov(innovation_matrix.T)
@@ -815,16 +814,16 @@ class BestForNowTrack(DMSTrack):
                     print(f"Error computing s_empirical for track {track_id}: {e}")
                     continue
 
-                # 4. 计算损失
+                # 4. Compute loss
                 diff = s_theoretical - s_empirical
                 base_loss = F.mse_loss(s_theoretical, s_empirical)
 
-                weighted_loss = confidence * base_loss  # 根据样本数量加权
+                weighted_loss = confidence * base_loss  # Weight by number of samples
 
                 total_loss += weighted_loss
                 valid_pairs += 1
 
-                # 5. 可选：存储用于调试
+                # 5. Optional: store for debugging
                 self.s_theoretical[track_id] = s_theoretical
                 self.s_empirical[track_id] = s_empirical
 
@@ -832,66 +831,66 @@ class BestForNowTrack(DMSTrack):
 
     def kalman_update(self, prior_x, prior_P, bbox3d, R):
         """
-        独立的卡尔曼滤波更新函数，用于CI融合
+        Independent Kalman filter update function for CI fusion
 
         Args:
-            prior_x: 先验状态向量 [10, 1]
-            prior_P: 先验状态协方差矩阵 [10, 10]
-            bbox3d: 观测向量 [7] - [x, y, z, theta, l, w, h]
-            R: 观测协方差矩阵 [7, 7]
+            prior_x: Prior state vector [10, 1]
+            prior_P: Prior state covariance matrix [10, 10]
+            bbox3d: Observation vector [7] - [x, y, z, theta, l, w, h]
+            R: Observation covariance matrix [7, 7]
 
         Returns:
-            updated_x: 更新后的状态向量 [10, 1]
-            updated_P: 更新后的状态协方差矩阵 [10, 10]
+            updated_x: Updated state vector [10, 1]
+            updated_P: Updated state covariance matrix [10, 10]
         """
-        # 确保输入是正确的张量格式
+        # Ensure input is in correct tensor format
         if not isinstance(bbox3d, torch.Tensor):
             bbox3d = torch.tensor(bbox3d, dtype=self.dtype, device=self.device)
 
-        # 进行方向校正（处理角度的周期性）
+        # Perform orientation correction (handle angle periodicity)
         corrected_prior_x = prior_x.clone()
         corrected_prior_x[3], bbox3d[3] = self.orientation_correction_torch(
             prior_x[3], bbox3d[3]
         )
 
-        # 观测矩阵 H：将10维状态映射到7维观测
-        # H = [I_7x7, 0_7x3] - 只观测位置、角度、尺寸，不观测速度
+        # Observation matrix H: maps 10-dim state to 7-dim observation
+        # H = [I_7x7, 0_7x3] - only observe position, angle, size, not velocity
         H = torch.zeros((7, 10), dtype=self.dtype, device=self.device)
         H[:7, :7] = torch.eye(7, dtype=self.dtype, device=self.device)
 
-        # 卡尔曼滤波更新步骤
+        # Kalman filter update steps
 
-        # 1. 计算预测的观测值
+        # 1. Compute predicted observation
         z_pred = torch.matmul(H, corrected_prior_x)  # [7, 1]
 
-        # 2. 计算创新向量（残差）
+        # 2. Compute innovation vector (residual)
         z_obs = bbox3d.reshape(-1, 1)  # [7, 1]
         innovation = z_obs - z_pred  # [7, 1]
 
-        # 处理角度创新的周期性
+        # Handle angle innovation periodicity
         innovation[3] = self.within_range_torch(innovation[3])
 
-        # 3. 计算创新协方差矩阵
+        # 3. Compute innovation covariance matrix
         S = torch.matmul(torch.matmul(H, prior_P), H.t()) + R  # [7, 7]
 
-        # 4. 计算卡尔曼增益
+        # 4. Compute Kalman gain
         try:
             S_inv = torch.inverse(S)
         except:
-            # 如果S不可逆，使用伪逆
+            # Use pseudo-inverse if S is not invertible
             S_inv = torch.pinverse(S)
 
         K = torch.matmul(torch.matmul(prior_P, H.t()), S_inv)  # [10, 7]
 
-        # 5. 更新状态估计
+        # 5. Update state estimate
         updated_x = corrected_prior_x + torch.matmul(K, innovation)  # [10, 1]
 
-        # 6. 更新状态协方差（Joseph形式，数值稳定）
+        # 6. Update state covariance (Joseph form, numerically stable)
         I_KH = torch.eye(10, dtype=self.dtype, device=self.device) - torch.matmul(K, H)
         updated_P = torch.matmul(torch.matmul(I_KH, prior_P), I_KH.t()) + \
                     torch.matmul(torch.matmul(K, R), K.t())  # [10, 10]
 
-        # 7. 角度归一化
+        # 7. Angle normalization
         updated_x[3] = self.within_range_torch(updated_x[3])
 
         return updated_x, updated_P
@@ -900,36 +899,36 @@ class BestForNowTrack(DMSTrack):
                                                         dets_feature_dict, gt_boxes, gt_ids,
                                                         transformation_matrix_dict):
         """
-        保留顺序处理优势的多传感器协同跟踪算法 - 支持延迟模拟
+        Multi-sensor cooperative tracking algorithm preserving sequential processing advantages - supports delay simulation
         """
         measure_run_time = False
         loss_dict = {}
 
-        # =================== 步骤1: 将当前帧检测数据加入缓冲区 ===================
+        # Step 1: Add current frame detection data to buffer
         for cav_id in dets_all_dict.keys():
             dets = dets_all_dict[cav_id]['dets']
             info = dets_all_dict[cav_id]['info']
             feature = dets_feature_dict[cav_id]
             transformation_matrix = transformation_matrix_dict[cav_id]
 
-            # ✅ 添加到缓冲区
+            # Add to buffer
             self.add_detection_to_buffer(
                 cav_id, frame, dets, info, feature, transformation_matrix
             )
 
-        # =================== 步骤2: 从缓冲区获取延迟后的检测数据 ===================
+        # Step 2: Get delayed detection data from buffer
         dets_dict = {}
         info_dict = {}
         dets_feature_delayed = {}
         transformation_matrix_delayed = {}
-        actual_delays = {}  # 记录实际使用的延迟
+        actual_delays = {}  # Record actually used delays
 
-        # ✅ 使用延迟后的数据
+        # Use delayed data
         for cav_id in cav_id_list:
             delayed_data = self.get_delayed_detection(cav_id, frame)
 
             if delayed_data is None:
-                # 没有可用的延迟数据，跳过此CAV
+                # No available delayed data, skip this CAV
                 print(f"Warning: No delayed detection available for {cav_id} at frame {frame}")
                 continue
 
@@ -938,16 +937,16 @@ class BestForNowTrack(DMSTrack):
             dets_feature_delayed[cav_id] = delayed_data['feature']
             transformation_matrix_delayed[cav_id] = delayed_data['transformation_matrix']
 
-            # 记录实际延迟
+            # Record actual delay
             actual_delays[cav_id] = self.get_effective_delay(cav_id, frame)
 
-        # ✅ 每10帧打印一次延迟信息
+        # Print delay info every 10 frames
         if frame % 10 == 0:
             delay_info = ', '.join([f"{cav}:{actual_delays.get(cav, 0)}"
                                     for cav in cav_id_list])
             print(f"Frame {frame:3d} - Actual delays: {delay_info}")
 
-        # =================== 步骤3: 日志和预处理 ===================
+        # Step 3: Logging and preprocessing
         if self.debug_id:
             print('\nframe is %s' % frame)
 
@@ -959,16 +958,16 @@ class BestForNowTrack(DMSTrack):
         self.id_past_output = copy.copy(self.id_now_output)
         self.id_past = [trk.id for trk in self.trackers]
 
-        # 将检测数据转换为ground truth顺序
+        # Convert detection data to ground truth order
         dets_in_gt_order_dict = {}
-        for cav_id in dets_dict.keys():  # ✅ 使用延迟后的数据
+        for cav_id in dets_dict.keys():  # Use delayed data
             dets_in_gt_order_dict[cav_id] = self.process_dets_to_gt_order(dets_dict[cav_id])
 
-        # 将检测数据转换为Box3D格式
-        for cav_id in dets_dict.keys():  # ✅ 使用延迟后的数据
+        # Convert detection data to Box3D format
+        for cav_id in dets_dict.keys():  # Use delayed data
             dets_dict[cav_id] = self.process_dets(dets_dict[cav_id])
 
-        # =================== 步骤4: 协方差估计（使用延迟数据） ===================
+        # Step 4: Covariance estimation (using delayed data)
         default_init_P, default_init_Q, _ = DKF.get_ab3dmot_default_covariance_matrices(
             self.dtype, self.device, dim_x=10, dim_z=7)
 
@@ -979,8 +978,8 @@ class BestForNowTrack(DMSTrack):
         det_neg_log_likelihood_loss_sum = []
         det_neg_log_likelihood_loss_count = 0
 
-        for cav_id in dets_dict.keys():  # ✅ 使用延迟后的数据
-            # ✅ 使用延迟的特征数据
+        for cav_id in dets_dict.keys():  # Use delayed data
+            # Use delayed feature data
             dets_feature = dets_feature_delayed[cav_id]
             dets_feature = torch.tensor(dets_feature, dtype=self.dtype, device=self.device)
 
@@ -992,7 +991,7 @@ class BestForNowTrack(DMSTrack):
             dets_in_gt_order = torch.tensor(
                 dets_in_gt_order, dtype=self.dtype, device=self.device)
 
-            # 使用协方差网络
+            # Use covariance network
             if self.use_multiple_nets:
                 observation_covariance_dict[cav_id] = \
                     self.observation_covariance_net_dict[cav_id](
@@ -1002,12 +1001,12 @@ class BestForNowTrack(DMSTrack):
                     self.observation_covariance_net_dict['ego'](
                         dets_feature, frame, transformation_matrix, dets_in_gt_order)
 
-            # 生成可学习协方差矩阵
+            # Generate learnable covariance matrices
             learnable_init_P_dict[cav_id], learnable_R_dict[cav_id] = \
                 self.get_learnable_observation_covariance(
                     default_init_P, observation_covariance_dict[cav_id])
 
-            # 计算负对数似然损失
+            # Compute negative log-likelihood loss
             if not measure_run_time:
                 if dets_in_gt_order.shape[0] == 0:
                     continue
@@ -1018,7 +1017,7 @@ class BestForNowTrack(DMSTrack):
                     det_neg_log_likelihood_loss_dict[cav_id])
                 det_neg_log_likelihood_loss_count += matched_det_count
 
-        # 汇总负对数似然损失
+        # Aggregate negative log-likelihood loss
         if measure_run_time:
             loss_dict['det_neg_log_likelihood'] = {
                 'sum': torch.zeros(1, dtype=self.dtype, device=self.device),
@@ -1039,15 +1038,15 @@ class BestForNowTrack(DMSTrack):
                 'count': det_neg_log_likelihood_loss_count
             }
 
-        # =================== 后续步骤保持不变 ===================
-        # KF预测、关联损失、CI融合等逻辑与原来完全一样
+        # Subsequent steps remain the same
+        # KF prediction, association loss, CI fusion, etc. are exactly the same as before
 
         if self.force_gt_as_predicted_track and self.prev_prev_gt_boxes is not None:
             trks = self.transform_gt_as_predicted_track(frame)
         else:
             trks = self.prediction(default_init_Q)
 
-        # Q_net损失统计
+        # Q_net loss statistics
         if self.enable_learnable_Q and self.is_training:
             trajectory_q_loss_stats = self.compute_trajectory_q_loss_statistics()
             loss_dict['trajectory_q_loss'] = trajectory_q_loss_stats
@@ -1061,7 +1060,7 @@ class BestForNowTrack(DMSTrack):
         if (frame > 0) and (self.ego_com) and (self.oxts is not None):
             trks = self.ego_motion_compensation(frame, trks)
 
-        # 关联损失
+        # Association loss
         if measure_run_time:
             loss_dict['association'] = {
                 'sum': torch.zeros(1, dtype=self.dtype, device=self.device),
@@ -1076,7 +1075,7 @@ class BestForNowTrack(DMSTrack):
                 'count': association_loss_count
             }
 
-        # =================== 带CI融合的顺序处理 ===================
+        # Sequential processing with CI fusion
         track_fusion_buffer = {}
         for track_idx in range(len(self.trackers)):
             track_fusion_buffer[track_idx] = {
@@ -1087,12 +1086,12 @@ class BestForNowTrack(DMSTrack):
                 'cav_list': []
             }
 
-        # 顺序处理每个CAV
+        # Process each CAV sequentially
         for cav_id in cav_id_list:
             if cav_id not in dets_dict.keys():
                 continue
 
-            # 数据关联
+            # Data association
             trk_innovation_matrix = None
             if self.metric == 'm_dis':
                 trk_innovation_matrix = [
@@ -1109,7 +1108,7 @@ class BestForNowTrack(DMSTrack):
                 learnable_R_dict, frame, cav_id, track_fusion_buffer
             )
 
-            # S损失计算
+            # S loss computation
             if self.enable_learnable_Q and self.is_training:
                 s_loss, valid_pairs = self.compute_joint_rq_loss_unified(
                     matched, unmatched_trks, dets_dict[cav_id],
@@ -1124,7 +1123,7 @@ class BestForNowTrack(DMSTrack):
                     'count': 1
                 }
 
-            # 处理未匹配的检测
+            # Process unmatched detections
             new_id_list = self.birth(dets_dict[cav_id], info_dict[cav_id],
                                      unmatched_dets, frame, cav_id,
                                      learnable_init_P_dict)
@@ -1139,14 +1138,14 @@ class BestForNowTrack(DMSTrack):
                     'cav_list': []
                 }
 
-            # 更新trks
+            # Update trks
             trks = self.get_trks_for_match()
 
-        # 应用CI融合
+        # Apply CI fusion
         self.apply_ci_fusion_from_buffer(track_fusion_buffer, frame,
                                          is_training=not measure_run_time)
 
-        # 回归损失
+        # Regression loss
         if measure_run_time:
             loss_dict['regression'] = {
                 'sum': torch.zeros(1, dtype=self.dtype, device=self.device),
@@ -1159,13 +1158,13 @@ class BestForNowTrack(DMSTrack):
                 'count': regression_loss_count
             }
 
-        # 保存GT信息
+        # Save GT information
         self.prev_prev_gt_boxes = self.prev_gt_boxes
         self.prev_prev_gt_ids = self.prev_gt_ids
         self.prev_gt_boxes = gt_boxes
         self.prev_gt_ids = gt_ids
 
-        # 输出结果
+        # Output results
         results, matched_detection_id_dict, track_P = self.output()
 
         if len(results) > 0:
@@ -1184,7 +1183,7 @@ class BestForNowTrack(DMSTrack):
     def process_matched_tracks_with_ci_buffer(self, matched, unmatched_trks, dets, info, learnable_R_dict, frame,
                                               cav_id, track_fusion_buffer):
         """
-        处理匹配的轨迹，智能决定是直接更新还是准备CI融合
+        Process matched tracks, intelligently decide whether to update directly or prepare for CI fusion
         """
         assert (len(dets) == learnable_R_dict[cav_id].shape[0])
 
@@ -1195,20 +1194,20 @@ class BestForNowTrack(DMSTrack):
                 assert len(d) == 1, 'error'
                 det_idx = d[0]
 
-                # 准备检测数据
+                # Prepare detection data
                 bbox3d = Box3D.bbox2array(dets[det_idx])
                 learnable_R = learnable_R_dict[cav_id][det_idx]
 
-                # 将当前CAV添加到检测列表
+                # Add current CAV to detection list
                 track_fusion_buffer[t]['cav_list'].append(cav_id)
 
-                # 基于原始先验状态计算更新结果
+                # Compute update result based on original prior state
                 original_prior_x, original_prior_P = track_fusion_buffer[t]['original_prior_state']
                 updated_x, updated_P = self.perform_kalman_update_on_state(
                     original_prior_x.clone(), original_prior_P.clone(), bbox3d, learnable_R
                 )
 
-                # 将更新结果记录到缓冲区
+                # Record update result to buffer
                 track_fusion_buffer[t]['cav_updates'][cav_id] = {
                     'updated_x': updated_x,
                     'updated_P': updated_P,
@@ -1218,9 +1217,9 @@ class BestForNowTrack(DMSTrack):
                     'info': info[det_idx]
                 }
 
-                # 决策：直接更新 vs 准备CI融合
+                # Decision: direct update vs prepare for CI fusion
                 # if len(track_fusion_buffer[t]['cav_list']) == 1:
-                # 这是第一个检测到该轨迹的CAV，直接更新主轨迹（保持顺序处理优势）
+                # This is first CAV detecting this track, update main track directly (preserve sequential processing advantage)
                 trk.dkf.x[3], bbox3d[3] = self.orientation_correction_torch(trk.dkf.x[3], bbox3d[3])
 
                 trk.dkf.update(bbox3d, learnable_R, None)
@@ -1232,27 +1231,27 @@ class BestForNowTrack(DMSTrack):
                 trk.matched_detection_id_dict[cav_id] = det_idx
                 trk.info = info[det_idx]
 
-                # 第2个及后续CAV：只记录，不立即融合，等待最终统一处理
+                # 2nd and subsequent CAVs: only record, don't fuse immediately, wait for final unified processing
 
     def perform_kalman_update_on_state(self, x, P, bbox3d, R):
         """
-        在给定状态上执行卡尔曼滤波更新，不修改原始状态
+        Perform Kalman filter update on given state without modifying original state
         """
-        # 进行方向校正
+        # Perform orientation correction
         bbox3d = torch.tensor(bbox3d, dtype=self.dtype, device=self.device)
         x[3], bbox3d[3] = self.orientation_correction_torch(x[3], bbox3d[3])
 
-        # 观测矩阵 H (7x10)
+        # Observation matrix H (7x10)
         H = torch.zeros((7, 10), dtype=self.dtype, device=self.device)
         H[:7, :7] = torch.eye(7, dtype=self.dtype, device=self.device)
 
-        # 计算卡尔曼增益
-        S = torch.matmul(torch.matmul(H, P), H.t()) + R  # 创新协方差
-        K = torch.matmul(torch.matmul(P, H.t()), torch.inverse(S))  # 卡尔曼增益
+        # Compute Kalman gain
+        S = torch.matmul(torch.matmul(H, P), H.t()) + R  # Innovation covariance
+        K = torch.matmul(torch.matmul(P, H.t()), torch.inverse(S))  # Kalman gain
 
-        # 更新状态和协方差
+        # Update state and covariance
         z = bbox3d.reshape(-1, 1)
-        y = z - torch.matmul(H, x)  # 创新
+        y = z - torch.matmul(H, x)  # Innovation
         x_updated = x + torch.matmul(K, y)
         P_updated = P - torch.matmul(torch.matmul(K, H), P)
 
@@ -1262,33 +1261,33 @@ class BestForNowTrack(DMSTrack):
 
     def apply_ci_fusion_from_buffer(self, track_fusion_buffer, frame, is_training=False):
         """
-        对被2个或更多CAV检测到的轨迹应用CI融合（一次性处理）
+        Apply CI fusion to tracks detected by 2 or more CAVs (one-time processing)
         """
         ci = self.covariance_intersection
-        # print('正常融合')
+        # print('Normal fusion')
         # means = []
         # covariances = []
         # for trk_idx, trk in enumerate(self.trackers):
-        #     # 收集所有匹配到这个轨迹的CAV更新结果
+        #     # Collect all update results from CAVs that matched this track
         #
         #
-        #     # 首先添加原始预测状态
+        #     # First add original predicted state
         #     means.append(trk.dkf.x)
         #     covariances.append(trk.dkf.P)
         for track_idx, buffer_data in track_fusion_buffer.items():
-            # if len(buffer_data['cav_list']) >= 2:  # 2个或更多CAV
-            # 收集所有更新结果
+            # if len(buffer_data['cav_list']) >= 2:  # 2 or more CAVs
+            # Collect all update results
             means = []
             covariances = []
             main_trk = self.trackers[track_idx]
             # means.append(main_trk.dkf.x)
             # covariances.append(main_trk.dkf.P)
-            # 添加原始先验状态
+            # Add original prior state
             # original_prior_x, original_prior_P = buffer_data['original_prior_state']
             # means.append(original_prior_x)
             # covariances.append(original_prior_P)
 
-            # 添加各CAV的更新结果
+            # Add update results from each CAV
             cav_detections = {}
             for cav_id in buffer_data['cav_list']:
                 update_data = buffer_data['cav_updates'][cav_id]
@@ -1296,46 +1295,45 @@ class BestForNowTrack(DMSTrack):
                 covariances.append(update_data['updated_P'])
                 cav_detections[cav_id] = update_data['det_idx']
 
-            # 应用CI融合
+            # Apply CI fusion
             if len(means) > 1:
                 fused_mean, fused_cov = ci.fuse(means, covariances)
-                # 更新主轨迹
+                # Update main track
                 trk = self.trackers[track_idx]
                 trk.dkf.x = fused_mean
                 trk.dkf.P = fused_cov
                 trk.dkf.x[3] = self.within_range_torch(trk.dkf.x[3])
 
-                # 更新轨迹统计信息
+                # Update track statistics
                 trk.time_since_update = 0
                 trk.hits += 1
                 trk.last_updated_frame = frame
 
-                # 更新匹配信息 - 安全地获取最后一个CAV ID
-                if buffer_data['cav_list']:  # 确保列表不为空
+                # Update matching information - safely get last CAV ID
+                if buffer_data['cav_list']:  # Ensure list is not empty
                     last_cav_id = buffer_data['cav_list'][-1]
                     if last_cav_id in buffer_data['cav_updates']:
                         trk.info = buffer_data['cav_updates'][last_cav_id]['info']
 
-                # 记录所有匹配的检测
-                trk.matched_detection_id_dict = {}  # 重置
+                # Record all matched detections
+                trk.matched_detection_id_dict = {}  # Reset
                 for cav_id, det_idx in cav_detections.items():
                     trk.matched_detection_id_dict[cav_id] = det_idx
             elif len(means) == 1:
                 trk = self.trackers[track_idx]
                 trk.dkf.x[3] = self.within_range_torch(trk.dkf.x[3])
-                # 更新轨迹统计信息
+                # Update track statistics
                 trk.time_since_update = 0
                 trk.hits += 1
                 trk.last_updated_frame = frame
 
-                # 更新匹配信息 - 安全地获取最后一个CAV ID
-                if buffer_data['cav_list']:  # 确保列表不为空
+                # Update matching information - safely get last CAV ID
+                if buffer_data['cav_list']:  # Ensure list is not empty
                     last_cav_id = buffer_data['cav_list'][-1]
                     if last_cav_id in buffer_data['cav_updates']:
                         trk.info = buffer_data['cav_updates'][last_cav_id]['info']
 
-                # 记录所有匹配的检测
-                trk.matched_detection_id_dict = {}  # 重置
+                # Record all matched detections
+                trk.matched_detection_id_dict = {}  # Reset
                 for cav_id, det_idx in cav_detections.items():
                     trk.matched_detection_id_dict[cav_id] = det_idx
-
